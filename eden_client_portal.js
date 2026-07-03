@@ -1,0 +1,497 @@
+(function () {
+  if (window.__customMenuInjected) return;
+  window.__customMenuInjected = true;
+
+  (async function () {
+    console.log("🚀 Injecting custom menu (adaptive)...");
+
+    // ----- Cookie helpers -----
+    function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(";").shift();
+      return null;
+    }
+
+    let contactId, locationId;
+    try {
+      const catCookie = getCookie("cat");
+      if (!catCookie) throw new Error('"cat" cookie not found');
+      const decoded = atob(catCookie);
+      const data = JSON.parse(decoded);
+      contactId = data.contactId;
+      locationId = data.locationId;
+      if (!contactId || !locationId) throw new Error("Missing contactId or locationId");
+      console.log("✅ Contact ID:", contactId);
+      console.log("✅ Location ID:", locationId);
+    } catch (err) {
+      console.error("❌ Failed to parse cat cookie:", err);
+      return;
+    }
+
+    const API_KEY = "pit-d1d19b4b-5283-42f7-ac89-152899c0712e";
+    const PIPELINE_ID = "cNoHwKrEOwZk0NDKX3hn";
+
+    // ----- Modal -----
+    function showModal(title, contentGenerator, width = "650px") {
+      const oldOverlay = document.querySelector(".custom-modal-overlay");
+      if (oldOverlay) oldOverlay.remove();
+
+      const overlay = document.createElement("div");
+      overlay.className = "custom-modal-overlay";
+      overlay.style.cssText = `
+        position: fixed; top:0; left:0; width:100%; height:100%;
+        background: rgba(0,0,0,0.6); display: flex; align-items: center;
+        justify-content: center; z-index: 1000000; backdrop-filter: blur(2px);
+      `;
+
+      const modal = document.createElement("div");
+      modal.style.cssText = `
+        background: white; border-radius: 16px; width: ${width};
+        max-width: 90vw; max-height: 85vh; display: flex; flex-direction: column;
+        box-shadow: 0 25px 40px rgba(0,0,0,0.2); font-family: system-ui, sans-serif;
+      `;
+
+      const header = document.createElement("div");
+      header.style.cssText = `
+        padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0;
+        display: flex; justify-content: space-between; align-items: center;
+        font-weight: 600; font-size: 1.25rem;
+      `;
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = title;
+      const closeBtn = document.createElement("button");
+      closeBtn.textContent = "×";
+      closeBtn.style.cssText =
+        "background:none; border:none; font-size:1.8rem; cursor:pointer; line-height:1; padding:0 8px;";
+      header.appendChild(titleSpan);
+      header.appendChild(closeBtn);
+
+      const body = document.createElement("div");
+      body.style.cssText = "padding: 1.5rem; overflow-y: auto; flex: 1;";
+
+      modal.appendChild(header);
+      modal.appendChild(body);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      if (typeof contentGenerator === "function") contentGenerator(body);
+      else body.innerHTML = contentGenerator;
+
+      const closeModal = () => overlay.remove();
+      closeBtn.addEventListener("click", closeModal);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) closeModal();
+      });
+    }
+
+    // ----- Maintenance form -----
+    function openMaintenanceForm() {
+      const baseUrl = "https://links.parksidetownhouses.com/widget/form/OJSge0tmzT3CXjjfmSf2";
+      const url = `${baseUrl}?contact_id=${encodeURIComponent(contactId)}&locationId=${encodeURIComponent(locationId)}`;
+      showModal(
+        "Submit Maintenance Request",
+        (body) => {
+          const iframe = document.createElement("iframe");
+          iframe.src = url;
+          iframe.style.cssText = "width:100%; height:600px; border:none; border-radius:8px; background: white;";
+          iframe.title = "Maintenance Request Form";
+          body.appendChild(iframe);
+        },
+        "750px"
+      );
+    }
+
+    // ----- Opportunities fetch -----
+    async function getOpportunities() {
+      const url = "https://services.leadconnectorhq.com/opportunities/search";
+      const headers = {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Version: "2021-07-28",
+      };
+      const body = {
+        locationId: locationId,
+        filters: [
+          { field: "contact_id", operator: "eq", value: contactId },
+          { field: "pipeline_id", operator: "eq", value: [PIPELINE_ID] },
+        ],
+        query: "",
+        sort: [{ field: "date_added", direction: "desc" }],
+        limit: 100,
+        additionalDetails: {
+          notes: false,
+          tasks: false,
+          calendarEvents: false,
+          unReadConversations: false,
+        },
+        includeTopRelations: true,
+      };
+      try {
+        const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        return data.opportunities || [];
+      } catch (err) {
+        console.error("Error fetching opportunities:", err);
+        return [];
+      }
+    }
+
+    // ----- Transactions fetch -----
+    async function getTransactions() {
+      const url = `https://services.leadconnectorhq.com/payments/transactions?altId=${locationId}&altType=location&contactId=${contactId}`;
+      const headers = {
+        Authorization: `Bearer ${API_KEY}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Version: "2021-07-28",
+      };
+      try {
+        const response = await fetch(url, { method: "GET", headers });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        return data.data || [];
+      } catch (err) {
+        console.error("Error fetching transactions:", err);
+        return [];
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return str.replace(/[&<>]/g, function (m) {
+        if (m === "&") return "&amp;";
+        if (m === "<") return "&lt;";
+        if (m === ">") return "&gt;";
+        return m;
+      });
+    }
+
+    // ----- Opportunities modal -----
+    async function openOpportunitiesModal() {
+      showModal(
+        "Maintenance Requests",
+        async (body) => {
+          body.innerHTML = '<div style="text-align:center; padding:2rem;">Loading opportunities...</div>';
+          const opportunities = await getOpportunities();
+          if (!opportunities.length) {
+            body.innerHTML = "<p>No maintenance requests found.</p>";
+            return;
+          }
+          const container = document.createElement("div");
+          container.style.cssText = "display: flex; flex-direction: column; gap: 12px;";
+          opportunities.forEach((opp) => {
+            const card = document.createElement("div");
+            card.style.cssText =
+              "border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: #fafafa;";
+            const amount = opp.monetaryValue ? `$${opp.monetaryValue}` : "—";
+            const date = opp.createdAt ? new Date(opp.createdAt).toLocaleDateString() : "Unknown";
+            card.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap;">
+                <div>
+                  <strong style="font-size:1rem;">${escapeHtml(opp.name)}</strong>
+                  <div style="font-size:0.85rem; color:#4b5563;">Status: ${opp.status || "open"}</div>
+                  <div style="font-size:0.75rem; color:#6b7280;">Created: ${date}</div>
+                </div>
+                <div style="font-weight:600;">${amount}</div>
+              </div>
+            `;
+            container.appendChild(card);
+          });
+          body.innerHTML = "";
+          body.appendChild(container);
+        },
+        "650px"
+      );
+    }
+
+    // ----- Transactions modal -----
+    async function openTransactionsModal() {
+      showModal(
+        "Transactions",
+        async (body) => {
+          body.innerHTML = '<div style="text-align:center; padding:2rem;">Loading transactions...</div>';
+          const transactions = await getTransactions();
+          if (!transactions.length) {
+            body.innerHTML = "<p>No transactions found.</p>";
+            return;
+          }
+
+          const table = document.createElement("table");
+          table.style.cssText = "width:100%; border-collapse: collapse;";
+
+          const thead = document.createElement("thead");
+          const headerRow = document.createElement("tr");
+          headerRow.style.cssText = "background:#f1f5f9; border-bottom: 2px solid #cbd5e1;";
+          ["Date", "Description", "Status", "Amount"].forEach((h) => {
+            const th = document.createElement("th");
+            th.style.cssText = "padding:8px; text-align:left;";
+            th.textContent = h;
+            if (h === "Amount") th.style.textAlign = "right";
+            headerRow.appendChild(th);
+          });
+          thead.appendChild(headerRow);
+          table.appendChild(thead);
+
+          const tbody = document.createElement("tbody");
+          transactions.forEach((tx) => {
+            const row = document.createElement("tr");
+            row.style.borderBottom = "1px solid #e2e8f0";
+
+            const dateCell = document.createElement("td");
+            dateCell.style.padding = "8px";
+            dateCell.textContent = tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : "N/A";
+            row.appendChild(dateCell);
+
+            const descCell = document.createElement("td");
+            descCell.style.padding = "8px";
+            descCell.textContent = tx.entitySourceName || tx.entityType || "Transaction";
+            row.appendChild(descCell);
+
+            const statusCell = document.createElement("td");
+            statusCell.style.padding = "8px";
+            statusCell.textContent =
+              tx.status === "succeeded" ? "✅ Succeeded" : tx.status === "failed" ? "❌ Failed" : tx.status;
+            row.appendChild(statusCell);
+
+            const amountCell = document.createElement("td");
+            amountCell.style.padding = "8px";
+            amountCell.style.textAlign = "right";
+            amountCell.textContent = tx.amount ? `$${tx.amount}` : "—";
+            row.appendChild(amountCell);
+
+            tbody.appendChild(row);
+          });
+          table.appendChild(tbody);
+
+          body.innerHTML = "";
+          body.appendChild(table);
+        },
+        "750px"
+      );
+    }
+
+    // ----- Helper: wait for element -----
+    function waitForElement(selector, timeout = 5000) {
+      return new Promise((resolve) => {
+        const el = document.querySelector(selector);
+        if (el) return resolve(el);
+        const observer = new MutationObserver(() => {
+          const found = document.querySelector(selector);
+          if (found) {
+            observer.disconnect();
+            resolve(found);
+          }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(() => {
+          observer.disconnect();
+          resolve(null);
+        }, timeout);
+      });
+    }
+
+    // ----- Desktop icons (SVG) -----
+    const desktopWrenchIcon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 text-clientportal-font-primary"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21 21 17.25l-5.83-5.83M11.42 15.17l-4.88 4.88a2.25 2.25 0 01-3.18-3.18l4.88-4.88M11.42 15.17l3.15-3.15M5.25 5.25L9 9M9 9l3.75-3.75M9 9l-3.75 3.75M18.75 5.25L15 9M15 9l3.75 3.75M15 9l-3.75-3.75"/></svg>`;
+    const desktopListIcon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 text-clientportal-font-primary"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/></svg>`;
+    const desktopTxIcon = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 text-clientportal-font-primary"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75L5.25 21 2.25 23.25M21.75 18.75L18.75 21 21.75 23.25M12 3.75v16.5M8.25 9.75L12 6l3.75 3.75M8.25 14.25L12 18l3.75-3.75"/></svg>`;
+
+    // ----- Mobile icon URLs -----
+    const mobileIconUrls = [
+      "https://img.icons8.com/windows/32/request-service.png",
+      "https://img.icons8.com/windows/32/ingredients-list.png",
+      "https://img.icons8.com/material-outlined/24/ledger.png",
+    ];
+    const mobileLabels = ["Request Service", "List", "Maintenance List"];
+    const mobileHandlers = [openMaintenanceForm, openOpportunitiesModal, openTransactionsModal];
+
+    // ----- Breakpoint -----
+    const MOBILE_BREAKPOINT = 768;
+
+    // ----- Mobile injection (with new_mobile_icons class and margin-right) -----
+    async function injectMobile() {
+      console.log("📱 Injecting mobile top bar icons...");
+      const notifBtn = await waitForElement("#btn-notification");
+      if (!notifBtn) {
+        console.warn("⚠️ Mobile notification button not found");
+        return;
+      }
+      const rightContainer = notifBtn.closest(".flex.items-center");
+      if (!rightContainer) {
+        console.warn("⚠️ Mobile right container not found");
+        return;
+      }
+
+      // Add class and margin to the parent of all icons (existing + new)
+      rightContainer.classList.add("new_mobile_icons");
+      rightContainer.style.marginRight = "50px";
+
+      // Remove any previously injected mobile buttons
+      rightContainer.querySelectorAll(".custom-mobile-btn").forEach(el => el.remove());
+
+      // Helper to create an icon button from an image URL
+      function createMobileIconButton(iconUrl, label, clickHandler) {
+        const btn = document.createElement("button");
+        btn.className = "n-button n-button--default-type n-button--medium-type quaternary icon-only custom-mobile-btn";
+        btn.setAttribute("aria-label", label);
+        btn.style.cssText = `
+          --n-bezier: cubic-bezier(.4,0,.2,1);
+          --n-ripple-duration:.6s;
+          --n-opacity-disabled:0.5;
+          --n-wave-opacity:0.6;
+          font-weight:400;
+          --n-color:#0000;
+          --n-color-hover:rgba(46,51,56,.09);
+          --n-color-pressed:rgba(46,51,56,.13);
+          --n-color-focus:rgba(46,51,56,.09);
+          --n-color-disabled:#0000;
+          --n-ripple-color:#0000;
+          --n-text-color:rgba(52,64,84,1);
+          --n-text-color-hover:rgba(52,64,84,1);
+          --n-text-color-pressed:rgba(52,64,84,1);
+          --n-text-color-focus:rgba(52,64,84,1);
+          --n-text-color-disabled:rgba(52,64,84,1);
+          --n-border:1px solid rgb(224,224,230);
+          --n-border-hover:1px solid #004EEB;
+          --n-border-pressed:1px solid #155EEF;
+          --n-border-focus:1px solid #004EEB;
+          --n-border-disabled:1px solid rgb(224,224,230);
+          --n-width:34px;
+          --n-height:34px;
+          --n-font-size:14px;
+          --n-padding:initial;
+          --n-icon-size:18px;
+          --n-icon-margin:6px;
+          --n-border-radius:34px;
+          margin-right: 0;
+        `;
+        const img = document.createElement("img");
+        img.src = iconUrl;
+        img.alt = label;
+        img.style.width = "20px";
+        img.style.height = "20px";
+        const span = document.createElement("span");
+        span.className = "n-button__content";
+        span.appendChild(img);
+        btn.appendChild(span);
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          clickHandler();
+        });
+        return btn;
+      }
+
+      // Insert icons in reverse order so they appear left-to-right as: Request Service, List, Maintenance List
+      for (let i = mobileIconUrls.length - 1; i >= 0; i--) {
+        const btn = createMobileIconButton(mobileIconUrls[i], mobileLabels[i], mobileHandlers[i]);
+        rightContainer.insertBefore(btn, rightContainer.firstChild);
+      }
+
+      console.log("✅ Mobile icons injected with new_mobile_icons wrapper and margin-right 50px");
+    }
+
+    // ----- Desktop injection -----
+    async function injectDesktop() {
+      console.log("🖥️ Injecting desktop sidebar menu items...");
+      const avatarSection = await waitForElement(
+        ".flex.flex-col.items-center.justify-center.border-0.border-b"
+      );
+      if (!avatarSection) {
+        console.warn("⚠️ Desktop avatar section not found");
+        return;
+      }
+      const menuContainer = avatarSection.nextElementSibling;
+      if (!menuContainer) {
+        console.warn("⚠️ Desktop menu container not found");
+        return;
+      }
+
+      menuContainer.querySelectorAll(".custom-desktop-item").forEach(el => el.remove());
+
+      function createMenuItem(iconSvg, label, clickHandler) {
+        const div = document.createElement("div");
+        div.className =
+          "grid grid-cols-6 items-center border-0 border-b border-solid border-clientportal-fill cursor-pointer px-6 py-4 hover:bg-clientportal-fill custom-desktop-item";
+        div.style.cursor = "pointer";
+
+        const iconCol = document.createElement("div");
+        iconCol.className = "col-span-1 mt-2";
+        iconCol.innerHTML = iconSvg;
+
+        const labelCol = document.createElement("div");
+        labelCol.className = "col-span-4 text-clientportal-font-primary hl-text-md-medium";
+        labelCol.innerText = label;
+
+        const btnCol = document.createElement("div");
+        btnCol.className = "col-span-1 flex justify-end";
+        const btn = document.createElement("button");
+        btn.className = "n-button n-button--default-type n-button--medium-type quaternary icon-only";
+        btn.setAttribute("aria-label", label);
+        btn.style.cssText = `--n-bezier: cubic-bezier(.4,0,.2,1); --n-ripple-duration:.6s; --n-opacity-disabled:0.5; --n-wave-opacity:0.6; font-weight:400; --n-color:#0000; --n-color-hover:rgba(46,51,56,.09); --n-color-pressed:rgba(46,51,56,.13); --n-color-focus:rgba(46,51,56,.09); --n-color-disabled:#0000; --n-ripple-color:#0000; --n-text-color:rgba(52,64,84,1); --n-text-color-hover:rgba(52,64,84,1); --n-text-color-pressed:rgba(52,64,84,1); --n-text-color-focus:rgba(52,64,84,1); --n-text-color-disabled:rgba(52,64,84,1); --n-border:1px solid rgb(224,224,230); --n-border-hover:1px solid #004EEB; --n-border-pressed:1px solid #155EEF; --n-border-focus:1px solid #004EEB; --n-border-disabled:1px solid rgb(224,224,230); --n-width:34px; --n-height:34px; --n-font-size:14px; --n-padding:initial; --n-icon-size:18px; --n-icon-margin:6px; --n-border-radius:34px;`;
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="h-5 w-5 text-clientportal-primary"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16l4-4m0 0l-4-4m4 4H8m14 0c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2s10 4.477 10 10z"></path></svg>`;
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          clickHandler();
+        });
+        btnCol.appendChild(btn);
+
+        div.appendChild(iconCol);
+        div.appendChild(labelCol);
+        div.appendChild(btnCol);
+        div.addEventListener("click", (e) => {
+          if (!e.target.closest("button")) clickHandler();
+        });
+        return div;
+      }
+
+      const desktopItems = [
+        { icon: desktopWrenchIcon, label: "Submit Maintenance Request", handler: openMaintenanceForm },
+        { icon: desktopListIcon, label: "Maintenance Requests", handler: openOpportunitiesModal },
+        { icon: desktopTxIcon, label: "Transactions", handler: openTransactionsModal },
+      ];
+
+      let insertAfter = null;
+      const existingItems = menuContainer.querySelectorAll(":scope > .grid");
+      if (existingItems.length) insertAfter = existingItems[existingItems.length - 1];
+
+      desktopItems.forEach(item => {
+        const el = createMenuItem(item.icon, item.label, item.handler);
+        if (insertAfter) {
+          insertAfter.insertAdjacentElement("afterend", el);
+          insertAfter = el;
+        } else {
+          menuContainer.appendChild(el);
+          insertAfter = el;
+        }
+      });
+
+      console.log("✅ Desktop menu items injected");
+    }
+
+    // ----- Viewport decision & reactivity -----
+    let currentViewportIsMobile = null;
+    async function injectForViewport() {
+      const mobile = window.innerWidth <= MOBILE_BREAKPOINT;
+      if (mobile === currentViewportIsMobile) return;
+      currentViewportIsMobile = mobile;
+      if (mobile) {
+        await injectMobile();
+      } else {
+        await injectDesktop();
+      }
+    }
+
+    let resizeTimer;
+    function onResize() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(injectForViewport, 200);
+    }
+    window.addEventListener("resize", onResize);
+
+    // Initial injection
+    await injectForViewport();
+    console.log("✅ Custom menu adaptive script ready. Contact ID:", contactId);
+  })();
+})();
