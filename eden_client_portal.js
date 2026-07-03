@@ -326,7 +326,7 @@
 
       // Add class and margin to the parent of all icons (existing + new)
       rightContainer.classList.add("new_mobile_icons");
-      rightContainer.style.marginRight = "50px";
+      rightContainer.style.marginRight = "80px";
 
       // Remove any previously injected mobile buttons
       rightContainer.querySelectorAll(".custom-mobile-btn").forEach(el => el.remove());
