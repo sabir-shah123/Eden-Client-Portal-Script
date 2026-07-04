@@ -29,8 +29,266 @@
       return;
     }
 
-    const API_KEY = "pit-d1d19b4b-5283-42f7-ac89-152899c0712e";
-    const PIPELINE_ID = "cNoHwKrEOwZk0NDKX3hn";
+    const API_KEY = "pit-65bf3e6f-96d0-4b48-a262-f12f57d4b7d7";
+    const PIPELINE_NAME = "Property Maintenance";
+    // const PIPELINE_ID = "cNoHwKrEOwZk0NDKX3hn";
+    const PIPELINE_CACHE_KEY = "customMenu:pipelinesCache:v1";
+    const CUSTOM_FIELDS_CACHE_KEY = "customMenu:opportunityCustomFieldsCache:v1";
+    let pipelineCacheMemory = null;
+    let customFieldsCacheMemory = null;
+
+    function readPipelineCache() {
+      if (pipelineCacheMemory) return pipelineCacheMemory;
+      try {
+        const raw = localStorage.getItem(PIPELINE_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.pipelines)) return null;
+        pipelineCacheMemory = parsed;
+        return parsed;
+      } catch (err) {
+        console.warn("⚠️ Failed to read pipeline cache:", err);
+        return null;
+      }
+    }
+
+    function writePipelineCache(data) {
+      pipelineCacheMemory = data;
+      try {
+        localStorage.setItem(PIPELINE_CACHE_KEY, JSON.stringify(data));
+      } catch (err) {
+        console.warn("⚠️ Failed to store pipeline cache:", err);
+      }
+    }
+
+    function readCustomFieldsCache() {
+      if (customFieldsCacheMemory) return customFieldsCacheMemory;
+      try {
+        const raw = localStorage.getItem(CUSTOM_FIELDS_CACHE_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.customFields)) return null;
+        customFieldsCacheMemory = parsed;
+        return parsed;
+      } catch (err) {
+        console.warn("⚠️ Failed to read custom fields cache:", err);
+        return null;
+      }
+    }
+
+    function writeCustomFieldsCache(data) {
+      customFieldsCacheMemory = data;
+      try {
+        localStorage.setItem(CUSTOM_FIELDS_CACHE_KEY, JSON.stringify(data));
+      } catch (err) {
+        console.warn("⚠️ Failed to store custom fields cache:", err);
+      }
+    }
+
+    function getPipelineByNameFromCache(name, pipelinesData) {
+      const data = pipelinesData || readPipelineCache();
+      if (!data || !Array.isArray(data.pipelines)) return null;
+      return data.pipelines.find((pipeline) => pipeline.name === name) || null;
+    }
+
+    function getPipelineByIdFromCache(pipelineId, pipelinesData) {
+      const data = pipelinesData || readPipelineCache();
+      if (!data || !Array.isArray(data.pipelines) || !pipelineId) return null;
+      return data.pipelines.find((pipeline) => pipeline.id === pipelineId) || null;
+    }
+
+    function getStageMetaForOpportunity(opportunity, pipelinesData) {
+      const pipeline =
+        getPipelineByIdFromCache(opportunity.pipelineId || opportunity.pipeline_id, pipelinesData) ||
+        getPipelineByNameFromCache(PIPELINE_NAME, pipelinesData);
+      const stageId = opportunity.pipelineStageId || opportunity.stageId || opportunity.stage_id || null;
+      const stage = pipeline && Array.isArray(pipeline.stages)
+        ? pipeline.stages.find((item) => item.id === stageId)
+        : null;
+
+      return {
+        pipelineName: pipeline ? pipeline.name : PIPELINE_NAME,
+        pipelineId: pipeline ? pipeline.id : opportunity.pipelineId || opportunity.pipeline_id || null,
+        stageId,
+        stageName: stage ? stage.name : opportunity.pipelineStageName || opportunity.stageName || "Unknown stage",
+        stageColor: stage && stage.color ? stage.color : "#64748B",
+        stagePosition: stage && typeof stage.position === "number" ? stage.position : null,
+      };
+    }
+
+    function formatCurrency(amount) {
+      const numericAmount = Number(amount);
+      if (!Number.isFinite(numericAmount)) return "—";
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 2,
+      }).format(numericAmount);
+    }
+
+    function formatDate(value) {
+      if (!value) return "N/A";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "N/A";
+      return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+
+    function normalizeFieldKey(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+    }
+
+    function humanizeFieldKey(value) {
+      return String(value || "")
+        .replace(/^opportunity\./i, "")
+        .replace(/[_\.]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+    }
+
+    function getOpportunityValueMap(opportunity) {
+      const valueMap = new Map();
+      const rawFields = Array.isArray(opportunity && opportunity.customFields) ? opportunity.customFields : [];
+      rawFields.forEach((field) => {
+        if (!field) return;
+        const fieldId = field.id ? String(field.id) : "";
+        const fieldValue =
+          field.fieldValueString ??
+          field.fieldValue ??
+          field.value ??
+          field.textValue ??
+          field.dateValue ??
+          field.numberValue ??
+          "";
+        if (fieldId) valueMap.set(fieldId, fieldValue);
+      });
+      return valueMap;
+    }
+
+    function getCustomFieldLabel(definition) {
+      if (!definition) return "Field";
+      return definition.name || humanizeFieldKey(definition.fieldKey) || definition.id || "Field";
+    }
+
+    function getCustomFieldDefinitionsByKey(customFieldsData) {
+      const byId = new Map();
+      const byFieldKey = new Map();
+      const byNormalizedKey = new Map();
+      const definitions = Array.isArray(customFieldsData && customFieldsData.customFields) ? customFieldsData.customFields : [];
+
+      definitions.forEach((definition) => {
+        if (!definition) return;
+        if (definition.id) byId.set(String(definition.id), definition);
+        if (definition.fieldKey) {
+          byFieldKey.set(String(definition.fieldKey), definition);
+          byNormalizedKey.set(normalizeFieldKey(definition.fieldKey), definition);
+        }
+        if (definition.name) byNormalizedKey.set(normalizeFieldKey(definition.name), definition);
+      });
+
+      return { byId, byFieldKey, byNormalizedKey, definitions };
+    }
+
+    function getFieldValueFromOpportunity(opportunity, fieldKeys, customFieldsData) {
+      const definitions = getCustomFieldDefinitionsByKey(customFieldsData);
+      const valueMap = getOpportunityValueMap(opportunity);
+      const requestedKeys = Array.isArray(fieldKeys) ? fieldKeys : [fieldKeys];
+
+      for (const rawKey of requestedKeys) {
+        const normalizedKey = normalizeFieldKey(rawKey);
+        const directDefinition =
+          definitions.byFieldKey.get(String(rawKey)) ||
+          definitions.byNormalizedKey.get(normalizedKey) ||
+          null;
+
+        if (directDefinition && directDefinition.id && valueMap.has(String(directDefinition.id))) {
+          const value = valueMap.get(String(directDefinition.id));
+          if (value !== undefined && value !== null && value !== "") return value;
+        }
+
+        const opportunityFields = Array.isArray(opportunity && opportunity.customFields) ? opportunity.customFields : [];
+        const byFieldKeyMatch = opportunityFields.find((field) => normalizeFieldKey(field && (field.fieldKey || field.name)) === normalizedKey);
+        if (byFieldKeyMatch) {
+          const value =
+            byFieldKeyMatch.fieldValueString ??
+            byFieldKeyMatch.fieldValue ??
+            byFieldKeyMatch.value ??
+            byFieldKeyMatch.textValue ??
+            byFieldKeyMatch.dateValue ??
+            byFieldKeyMatch.numberValue ??
+            "";
+          if (value !== undefined && value !== null && value !== "") return value;
+        }
+      }
+
+      return "";
+    }
+
+    function getOpportunityStageGroup(opportunity, stageMeta) {
+      const stageName = String((stageMeta && stageMeta.stageName) || opportunity.pipelineStageName || opportunity.stageName || "").toLowerCase();
+      if (/closed/.test(stageName)) return "closed";
+      if (/completed|resolved|done/.test(stageName)) return "completed";
+      return "active";
+    }
+
+    function openMaintainerDetailsModal(opportunity, stageMeta, customFieldsData) {
+      const maintainerName = getFieldValueFromOpportunity(opportunity, ["opportunity.maintainer_name", "maintainer_name"], customFieldsData) || "N/A";
+      const maintainerPhone = getFieldValueFromOpportunity(opportunity, ["opportunity.maintainer_phone", "maintainer_phone"], customFieldsData) || "N/A";
+      const maintainerEmail = getFieldValueFromOpportunity(opportunity, ["opportunity.maintainer_email", "maintainer_email"], customFieldsData) || "N/A";
+      const issueDescription = getFieldValueFromOpportunity(opportunity, ["opportunity.issue_description", "issue_description"], customFieldsData) || "N/A";
+      const maintenanceInstructions = getFieldValueFromOpportunity(opportunity, ["opportunity.maintenance_instructions", "maintenance_instructions"], customFieldsData) || "N/A";
+
+      showModal(
+        "Maintainer Details",
+        (body) => {
+          body.style.cssText = "padding: 0; overflow-y: auto; flex: 1; background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);";
+          body.innerHTML = `
+            <div style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
+              <div style="border: 1px solid #dbe3ee; border-radius: 18px; background: #fff; padding: 18px; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);">
+                <div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 12px;">
+                  <div>
+                    <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 700; margin-bottom: 6px;">Maintenance Request</div>
+                    <div style="font-size: 1.25rem; font-weight: 800; color: #0f172a;">${escapeHtml(opportunity.name || "Maintenance Request")}</div>
+                  </div>
+                  <div style="text-align: right;">
+                    <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 700; margin-bottom: 6px;">Stage</div>
+                    <div style="display: inline-flex; align-items: center; padding: 5px 10px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 0.75rem; font-weight: 700;">${escapeHtml(stageMeta && stageMeta.stageName ? stageMeta.stageName : "Unknown")}</div>
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+                  ${[
+                    ["Maintainer Name", maintainerName],
+                    ["Maintainer Phone", maintainerPhone],
+                    ["Maintainer Email", maintainerEmail],
+                    ["Issue Description", issueDescription],
+                  ].map(([label, value]) => `
+                    <div style="border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; padding: 14px;">
+                      <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; font-weight: 700; margin-bottom: 6px;">${label}</div>
+                      <div style="font-size: 0.95rem; color: #0f172a; font-weight: 600; line-height: 1.5; word-break: break-word;">${escapeHtml(String(value))}</div>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+          `;
+        },
+        "760px"
+      );
+    }
+
+    function isClosedOpportunity(opportunity, stageMeta) {
+      const status = String(opportunity.status || "").toLowerCase();
+      const stageName = String((stageMeta && stageMeta.stageName) || opportunity.pipelineStageName || opportunity.stageName || "").toLowerCase();
+      return /closed|completed|cancelled|canceled|won|done/.test(status) || /closed|completed|resolved|done/.test(stageName);
+    }
 
     // ----- Modal -----
     function showModal(title, contentGenerator, width = "650px") {
@@ -102,8 +360,87 @@
       );
     }
 
+    async function getPipelineIdByName(name) {
+      const pipelinesData = await getPipelinesData();
+      const pipeline = getPipelineByNameFromCache(name, pipelinesData);
+      return pipeline ? pipeline.id : null;
+    }
+
+    async function getPipelinesData(forceRefresh = false) {
+      if (!forceRefresh) {
+        const cached = readPipelineCache();
+        if (cached && Array.isArray(cached.pipelines) && cached.pipelines.length) {
+          return cached;
+        }
+      }
+
+      const url = "https://services.leadconnectorhq.com/opportunities/pipelines?locationId=" + encodeURIComponent(locationId);
+      const headers = {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Version: "2021-07-28",
+      };
+
+      try {
+        const response = await fetch(url, { method: "GET", headers });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const normalized = {
+          savedAt: Date.now(),
+          pipelines: Array.isArray(data.pipelines) ? data.pipelines : [],
+        };
+        writePipelineCache(normalized);
+        return normalized;
+      } catch (err) {
+        console.error("Error fetching pipeline data:", err);
+        return readPipelineCache() || { savedAt: Date.now(), pipelines: [] };
+      }
+    }
+
+    async function getOpportunityCustomFieldsData(forceRefresh = false) {
+      if (!forceRefresh) {
+        const cached = readCustomFieldsCache();
+        if (cached && Array.isArray(cached.customFields) && cached.customFields.length) {
+          return cached;
+        }
+      }
+
+      const url = "https://services.leadconnectorhq.com/locations/" + encodeURIComponent(locationId) + "/customFields?model=opportunity";
+      const headers = {
+        Authorization: `Bearer ${API_KEY}`,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        Version: "2021-07-28",
+      };
+
+      try {
+        const response = await fetch(url, { method: "GET", headers });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const normalized = {
+          savedAt: Date.now(),
+          customFields: Array.isArray(data.customFields) ? data.customFields : [],
+        };
+        writeCustomFieldsCache(normalized);
+        return normalized;
+      } catch (err) {
+        console.error("Error fetching opportunity custom fields:", err);
+        return readCustomFieldsCache() || { savedAt: Date.now(), customFields: [] };
+      }
+    }
+
+
     // ----- Opportunities fetch -----
     async function getOpportunities() {
+      const pipelinesData = await getPipelinesData();
+      const pipeline = getPipelineByNameFromCache(PIPELINE_NAME, pipelinesData);
+      const pipelineId = pipeline ? pipeline.id : null;
+      if (!pipelineId) {
+        console.warn("⚠️ Property Maintenance pipeline not found in cache");
+        return [];
+      }
+
       const url = "https://services.leadconnectorhq.com/opportunities/search";
       const headers = {
         Authorization: `Bearer ${API_KEY}`,
@@ -115,7 +452,7 @@
         locationId: locationId,
         filters: [
           { field: "contact_id", operator: "eq", value: contactId },
-          { field: "pipeline_id", operator: "eq", value: [PIPELINE_ID] },
+          { field: "pipeline_id", operator: "eq", value: [pipelineId] },
         ],
         query: "",
         sort: [{ field: "date_added", direction: "desc" }],
@@ -132,7 +469,12 @@
         const response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
-        return data.opportunities || [];
+        const opportunities = Array.isArray(data.opportunities) ? data.opportunities : [];
+
+        return opportunities.map((opportunity) => ({
+          ...opportunity,
+          __pipelineMeta: getStageMetaForOpportunity(opportunity, pipelinesData),
+        }));
       } catch (err) {
         console.error("Error fetching opportunities:", err);
         return [];
@@ -174,36 +516,251 @@
       showModal(
         "Maintenance Requests",
         async (body) => {
-          body.innerHTML = '<div style="text-align:center; padding:2rem;">Loading opportunities...</div>';
-          const opportunities = await getOpportunities();
+          body.style.cssText = "padding: 0; overflow-y: auto; flex: 1; background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);";
+          body.innerHTML = '<div style="text-align:center; padding:2.5rem; color:#475569;">Loading maintenance requests...</div>';
+          const [opportunities, customFieldsData] = await Promise.all([
+            getOpportunities(),
+            getOpportunityCustomFieldsData(),
+          ]);
           if (!opportunities.length) {
-            body.innerHTML = "<p>No maintenance requests found.</p>";
-            return;
-          }
-          const container = document.createElement("div");
-          container.style.cssText = "display: flex; flex-direction: column; gap: 12px;";
-          opportunities.forEach((opp) => {
-            const card = document.createElement("div");
-            card.style.cssText =
-              "border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; background: #fafafa;";
-            const amount = opp.monetaryValue ? `$${opp.monetaryValue}` : "—";
-            const date = opp.createdAt ? new Date(opp.createdAt).toLocaleDateString() : "Unknown";
-            card.innerHTML = `
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap;">
-                <div>
-                  <strong style="font-size:1rem;">${escapeHtml(opp.name)}</strong>
-                  <div style="font-size:0.85rem; color:#4b5563;">Status: ${opp.status || "open"}</div>
-                  <div style="font-size:0.75rem; color:#6b7280;">Created: ${date}</div>
-                </div>
-                <div style="font-weight:600;">${amount}</div>
+            body.innerHTML = `
+              <div style="text-align:center; padding:3rem 1rem; color:#475569;">
+                <div style="font-size:1.1rem; font-weight:700; color:#0f172a; margin-bottom:0.4rem;">No maintenance requests found</div>
+                <div style="font-size:0.92rem;">Requests will appear here once they are submitted.</div>
               </div>
             `;
-            container.appendChild(card);
+            return;
+          }
+
+          const groupedOpportunities = {
+            active: [],
+            completed: [],
+            closed: [],
+          };
+
+          opportunities.forEach((opportunity) => {
+            const stageMeta = opportunity.__pipelineMeta || {};
+            const group = getOpportunityStageGroup(opportunity, stageMeta);
+            groupedOpportunities[group].push(opportunity);
           });
+
+          Object.keys(groupedOpportunities).forEach((groupKey) => {
+            groupedOpportunities[groupKey].sort((left, right) => {
+              const leftDate = left.updatedAt ? new Date(left.updatedAt).getTime() : left.createdAt ? new Date(left.createdAt).getTime() : 0;
+              const rightDate = right.updatedAt ? new Date(right.updatedAt).getTime() : right.createdAt ? new Date(right.createdAt).getTime() : 0;
+              return rightDate - leftDate;
+            });
+          });
+
+          const activeCount = groupedOpportunities.active.length;
+          const completedCount = groupedOpportunities.completed.length;
+          const closedCount = groupedOpportunities.closed.length;
+
+          const sortedOpportunities = [...opportunities].sort((left, right) => {
+            const leftClosed = isClosedOpportunity(left, left.__pipelineMeta);
+            const rightClosed = isClosedOpportunity(right, right.__pipelineMeta);
+            if (leftClosed !== rightClosed) return leftClosed ? 1 : -1;
+
+            const leftDate = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+            const rightDate = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+            return rightDate - leftDate;
+          });
+
+          const tabDefinitions = [
+            { key: "active", label: "Active Requests", count: activeCount },
+            { key: "completed", label: "Completed", count: completedCount },
+            { key: "closed", label: "Closed", count: closedCount },
+          ];
+
+          const container = document.createElement("div");
+          container.style.cssText = "padding: 20px; display: flex; flex-direction: column; gap: 16px;";
+
+          const summary = document.createElement("div");
+          summary.style.cssText = "display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px;";
+          summary.innerHTML = `
+            <div style="border:1px solid #dbe3ee; border-radius:16px; padding:14px 16px; background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);">
+              <div style="font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700;">Active</div>
+              <div style="font-size:1.7rem; font-weight:800; color:#0f172a; line-height:1.1; margin-top:4px;">${activeCount}</div>
+            </div>
+            <div style="border:1px solid #dbe3ee; border-radius:16px; padding:14px 16px; background:linear-gradient(180deg,#fbfbfd 0%,#f4f6fa 100%);">
+              <div style="font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700;">Completed</div>
+              <div style="font-size:1.7rem; font-weight:800; color:#0f172a; line-height:1.1; margin-top:4px;">${completedCount}</div>
+            </div>
+            <div style="border:1px solid #dbe3ee; border-radius:16px; padding:14px 16px; background:linear-gradient(180deg,#fffafa 0%,#fef3f2 100%);">
+              <div style="font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; color:#b42318; font-weight:700;">Closed</div>
+              <div style="font-size:1.7rem; font-weight:800; color:#0f172a; line-height:1.1; margin-top:4px;">${closedCount}</div>
+            </div>
+          `;
+          container.appendChild(summary);
+
+          const tabBar = document.createElement("div");
+          tabBar.style.cssText = "display:flex; gap:10px; flex-wrap:wrap;";
+          const listContainer = document.createElement("div");
+
+          function getTabButtonStyle(isSelected, tone) {
+            const selectedTone = tone === "closed" ? ["#fff1f0", "#b42318", "#fda29b"] : tone === "completed" ? ["#ecfeff", "#0e7490", "#99f6e4"] : ["#ecfdf3", "#067647", "#abefc6"];
+            const background = isSelected ? selectedTone[0] : "#fff";
+            const color = isSelected ? selectedTone[1] : "#334155";
+            const borderColor = isSelected ? selectedTone[2] : "#dbe3ee";
+            return `border:1px solid ${borderColor}; background:${background}; color:${color};`;
+          }
+
+          function renderCards(tabKey) {
+            listContainer.innerHTML = "";
+            const items = groupedOpportunities[tabKey] || [];
+
+            if (!items.length) {
+              listContainer.innerHTML = `
+                <div style="border:1px dashed #cbd5e1; border-radius:18px; padding:24px; text-align:center; color:#64748b; background:#fff;">
+                  No ${escapeHtml(tabKey)} maintenance requests.
+                </div>
+              `;
+              return;
+            }
+
+            const cardsWrapper = document.createElement("div");
+            cardsWrapper.style.cssText = "display:flex; flex-direction:column; gap:14px;";
+
+            items.forEach((opp) => {
+              const stageMeta = opp.__pipelineMeta || {};
+              const amount = formatCurrency(opp.monetaryValue);
+              const createdDate = formatDate(opp.createdAt);
+              const updatedDate = formatDate(opp.updatedAt);
+              const stageBadge = stageMeta.stageName || "Unknown stage";
+              const stageColor = stageMeta.stageColor || "#64748B";
+              const stageGroup = getOpportunityStageGroup(opp, stageMeta);
+              const maintainerName = getFieldValueFromOpportunity(opp, ["opportunity.maintainer_name", "maintainer_name"], customFieldsData) || "N/A";
+              const maintainerPhone = getFieldValueFromOpportunity(opp, ["opportunity.maintainer_phone", "maintainer_phone"], customFieldsData) || "N/A";
+              const maintainerEmail = getFieldValueFromOpportunity(opp, ["opportunity.maintainer_email", "maintainer_email"], customFieldsData) || "N/A";
+              const issueDescription = getFieldValueFromOpportunity(opp, ["opportunity.issue_description", "issue_description"], customFieldsData) || "N/A";
+              const statusTone = stageGroup === "closed" ? "closed" : stageGroup === "completed" ? "completed" : "active";
+
+              const card = document.createElement("div");
+              card.style.cssText = "border:1px solid #dbe3ee; border-radius:20px; background:#fff; box-shadow:0 10px 30px rgba(15, 23, 42, 0.05); overflow:hidden;";
+              card.innerHTML = `
+                <div style="height:5px; background:${stageColor};"></div>
+                <div style="padding:18px; display:flex; flex-direction:column; gap:14px;">
+                  <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+                    <div style="min-width:0; flex:1;">
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                        <span style="display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; background:${statusTone === "closed" ? "#fff1f0" : statusTone === "completed" ? "#ecfeff" : "#ecfdf3"}; color:${statusTone === "closed" ? "#b42318" : statusTone === "completed" ? "#0e7490" : "#067647"}; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">${escapeHtml(stageBadge)}</span>
+                        <span style="display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; background:#f1f5f9; color:#334155; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">${escapeHtml(stageGroup === "active" ? "Active Request" : stageGroup === "completed" ? "Completed" : "Closed")}</span>
+                      </div>
+                      <div style="font-size:1.08rem; font-weight:800; color:#0f172a; line-height:1.35; margin-bottom:8px;">${escapeHtml(opp.name || "Maintenance Request")}</div>
+                      <div style="display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; color:#64748b; font-size:0.86rem;">
+                        <div><strong style="color:#334155; font-weight:700;">Request Opened:</strong> ${createdDate}</div>
+                        <div><strong style="color:#334155; font-weight:700;">Last Updated:</strong> ${updatedDate}</div>
+                        <div hidden><strong style="color:#334155; font-weight:700;">Source:</strong> ${escapeHtml(opp.source || "Maintenance Form")}</div>
+                        <div hidden><strong style="color:#334155; font-weight:700;">Pipeline:</strong> ${escapeHtml(stageMeta.pipelineName || PIPELINE_NAME)}</div>
+                      </div>
+                    </div>
+                    <div style="text-align:right; min-width:120px;" hidden>
+                      <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700; margin-bottom:4px;">Amount</div>
+                      <div style="font-size:1.25rem; font-weight:800; color:#0f172a;">${amount}</div>
+                    </div>
+                  </div>
+
+                  <div style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px;">
+                    ${[
+                      ["Maintainer", maintainerName],
+                      ["Phone", maintainerPhone],
+                      ["Email", maintainerEmail],
+                    ].map(([label, value]) => `
+                      <div style="border:1px solid #e2e8f0; border-radius:14px; background:#f8fafc; padding:12px;">
+                        <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700; margin-bottom:5px;">${label}</div>
+                        <div style="font-size:0.92rem; color:#0f172a; font-weight:600; line-height:1.45; word-break:break-word;">${escapeHtml(String(value))}</div>
+                      </div>
+                    `).join("")}
+                  </div>
+
+                  <div style="border:1px solid #e2e8f0; border-radius:16px; background:#f8fafc; padding:14px;">
+                    <div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700; margin-bottom:6px;">Issue Description</div>
+                    <div style="font-size:0.95rem; color:#334155; line-height:1.7; white-space:pre-wrap;">${escapeHtml(String(issueDescription))}</div>
+                  </div>
+
+                  <div style="display:flex; justify-content:flex-end;">
+                    <button type="button" class="maintainer-details-btn" style="border:1px solid #0f172a; background:#0f172a; color:#fff; padding:10px 14px; border-radius:12px; font-size:0.9rem; font-weight:700; cursor:pointer;">
+                      Maintainer Details
+                    </button>
+                  </div>
+                </div>
+              `;
+
+              const detailsButton = card.querySelector(".maintainer-details-btn");
+              detailsButton.addEventListener("click", () => openMaintainerDetailsModal(opp, stageMeta, customFieldsData));
+              cardsWrapper.appendChild(card);
+            });
+
+            listContainer.appendChild(cardsWrapper);
+          }
+
+          tabDefinitions.forEach((tab) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = `${tab.label} (${tab.count})`;
+            button.style.cssText = `
+              border-radius: 999px;
+              padding: 10px 14px;
+              font-size: 0.86rem;
+              font-weight: 700;
+              cursor: pointer;
+              transition: all 0.15s ease;
+              ${getTabButtonStyle(tab.key === "active", tab.key)}
+            `;
+            button.addEventListener("click", () => {
+              tabBar.querySelectorAll("button").forEach((otherButton) => {
+                const isSelected = otherButton === button;
+                const key = otherButton.getAttribute("data-tab-key") || "active";
+                otherButton.style.cssText = `
+                  border-radius: 999px;
+                  padding: 10px 14px;
+                  font-size: 0.86rem;
+                  font-weight: 700;
+                  cursor: pointer;
+                  transition: all 0.15s ease;
+                  ${getTabButtonStyle(isSelected, key)}
+                `;
+              });
+              renderCards(tab.key);
+            });
+            button.setAttribute("data-tab-key", tab.key);
+            tabBar.appendChild(button);
+          });
+
+          const header = document.createElement("div");
+          header.style.cssText = "display:flex; flex-direction:column; gap:10px;";
+          header.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+              <div>
+                <div style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700; margin-bottom:6px;">Property Maintenance</div>
+                <div style="font-size:1.25rem; font-weight:800; color:#0f172a;">Maintenance Requests</div>
+              </div>
+              <div style="text-align:right; color:#64748b; font-size:0.9rem; line-height:1.5;">
+                <div><strong style="color:#0f172a;">Active:</strong> ${activeCount}</div>
+                <div><strong style="color:#0f172a;">Completed:</strong> ${completedCount}</div>
+                <div><strong style="color:#0f172a;">Closed:</strong> ${closedCount}</div>
+              </div>
+            </div>
+          `;
+
           body.innerHTML = "";
           body.appendChild(container);
+          container.insertBefore(header, container.firstChild);
+          container.insertBefore(tabBar, header.nextSibling);
+          container.appendChild(listContainer);
+
+          tabBar.querySelector('button[data-tab-key="active"]').style.cssText = `
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 0.86rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            ${getTabButtonStyle(true, "active")}
+          `;
+          renderCards("active");
         },
-        "650px"
+        "920px"
       );
     }
 
@@ -212,22 +769,53 @@
       showModal(
         "Transactions",
         async (body) => {
-          body.innerHTML = '<div style="text-align:center; padding:2rem;">Loading transactions...</div>';
+          body.innerHTML = '<div style="text-align:center; padding:2.5rem; color:#475569;">Loading transactions...</div>';
           const transactions = await getTransactions();
           if (!transactions.length) {
-            body.innerHTML = "<p>No transactions found.</p>";
+            body.innerHTML = `
+              <div style="text-align:center; padding:2.5rem 1rem; color:#475569;">
+                <div style="font-size:1.05rem; font-weight:600; color:#0f172a; margin-bottom:0.35rem;">No transactions found</div>
+                <div style="font-size:0.9rem;">Payments and refunds will appear here when available.</div>
+              </div>
+            `;
             return;
           }
 
+          const totalAmount = transactions.reduce((sum, transaction) => {
+            const numericAmount = Number(transaction.amount);
+            return Number.isFinite(numericAmount) ? sum + numericAmount : sum;
+          }, 0);
+
+          const container = document.createElement("div");
+          container.style.cssText = "display:flex; flex-direction:column; gap:14px;";
+
+          const header = document.createElement("div");
+          header.style.cssText = `
+            display:grid;
+            grid-template-columns:repeat(2,minmax(0,1fr));
+            gap:12px;
+          `;
+          header.innerHTML = `
+            <div style="border:1px solid #dbe3ee; border-radius:16px; padding:14px 16px; background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);">
+              <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700;">Transactions</div>
+              <div style="font-size:1.7rem; font-weight:800; color:#0f172a; line-height:1.1; margin-top:4px;">${transactions.length}</div>
+            </div>
+            <div style="border:1px solid #dbe3ee; border-radius:16px; padding:14px 16px; background:linear-gradient(180deg,#fbfbfd 0%,#f4f6fa 100%);">
+              <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; color:#64748b; font-weight:700;">Total Amount</div>
+              <div style="font-size:1.7rem; font-weight:800; color:#0f172a; line-height:1.1; margin-top:4px;">${formatCurrency(totalAmount)}</div>
+            </div>
+          `;
+          container.appendChild(header);
+
           const table = document.createElement("table");
-          table.style.cssText = "width:100%; border-collapse: collapse;";
+          table.style.cssText = "width:100%; border-collapse: separate; border-spacing:0; overflow:hidden; border:1px solid #dbe3ee; border-radius:18px; background:#fff; box-shadow:0 10px 30px rgba(15, 23, 42, 0.05);";
 
           const thead = document.createElement("thead");
           const headerRow = document.createElement("tr");
-          headerRow.style.cssText = "background:#f1f5f9; border-bottom: 2px solid #cbd5e1;";
+          headerRow.style.cssText = "background:linear-gradient(180deg,#0f172a 0%,#111827 100%); color:#fff;";
           ["Date", "Description", "Status", "Amount"].forEach((h) => {
             const th = document.createElement("th");
-            th.style.cssText = "padding:8px; text-align:left;";
+            th.style.cssText = "padding:14px 16px; text-align:left; font-size:0.75rem; letter-spacing:0.06em; text-transform:uppercase; font-weight:700; color:inherit;";
             th.textContent = h;
             if (h === "Amount") th.style.textAlign = "right";
             headerRow.appendChild(th);
@@ -239,27 +827,55 @@
           transactions.forEach((tx) => {
             const row = document.createElement("tr");
             row.style.borderBottom = "1px solid #e2e8f0";
+            row.style.transition = "background 0.15s ease";
+            row.addEventListener("mouseenter", () => {
+              row.style.background = "#f8fafc";
+            });
+            row.addEventListener("mouseleave", () => {
+              row.style.background = "#fff";
+            });
 
             const dateCell = document.createElement("td");
-            dateCell.style.padding = "8px";
-            dateCell.textContent = tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : "N/A";
+            dateCell.style.padding = "14px 16px";
+            dateCell.style.color = "#0f172a";
+            dateCell.textContent = formatDate(tx.createdAt);
             row.appendChild(dateCell);
 
             const descCell = document.createElement("td");
-            descCell.style.padding = "8px";
+            descCell.style.padding = "14px 16px";
+            descCell.style.color = "#0f172a";
+            descCell.style.fontWeight = "600";
             descCell.textContent = tx.entitySourceName || tx.entityType || "Transaction";
             row.appendChild(descCell);
 
             const statusCell = document.createElement("td");
-            statusCell.style.padding = "8px";
-            statusCell.textContent =
-              tx.status === "succeeded" ? "✅ Succeeded" : tx.status === "failed" ? "❌ Failed" : tx.status;
+            statusCell.style.padding = "14px 16px";
+            const status = String(tx.status || "unknown").toLowerCase();
+            const isSuccess = status === "succeeded" || status === "success" || status === "paid";
+            const isFailure = status === "failed" || status === "failure" || status === "declined";
+            const badge = document.createElement("span");
+            badge.style.cssText = `
+              display:inline-flex;
+              align-items:center;
+              padding:4px 10px;
+              border-radius:999px;
+              font-size:0.72rem;
+              font-weight:700;
+              text-transform:uppercase;
+              letter-spacing:0.06em;
+              background:${isSuccess ? "#ecfdf3" : isFailure ? "#fff1f0" : "#f1f5f9"};
+              color:${isSuccess ? "#067647" : isFailure ? "#b42318" : "#334155"};
+            `;
+            badge.textContent = isSuccess ? "Succeeded" : isFailure ? "Failed" : tx.status || "Unknown";
+            statusCell.appendChild(badge);
             row.appendChild(statusCell);
 
             const amountCell = document.createElement("td");
-            amountCell.style.padding = "8px";
+            amountCell.style.padding = "14px 16px";
             amountCell.style.textAlign = "right";
-            amountCell.textContent = tx.amount ? `$${tx.amount}` : "—";
+            amountCell.style.fontWeight = "800";
+            amountCell.style.color = isFailure ? "#b42318" : "#0f172a";
+            amountCell.textContent = formatCurrency(tx.amount);
             row.appendChild(amountCell);
 
             tbody.appendChild(row);
@@ -267,7 +883,8 @@
           table.appendChild(tbody);
 
           body.innerHTML = "";
-          body.appendChild(table);
+          container.appendChild(table);
+          body.appendChild(container);
         },
         "750px"
       );
