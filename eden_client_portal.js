@@ -3,7 +3,7 @@
   window.__customMenuInjected = true;
 
   (async function () {
-    console.log("🚀 Injecting custom menu (adaptive)...");
+    console.log(" Injecting custom menu (adaptive)...");
 
     // ----- Cookie helpers -----
     function getCookie(name) {
@@ -14,9 +14,14 @@
     }
 
     let contactId, locationId;
+    let catCookie =null;
     try {
-      const catCookie = getCookie("cat");
-      if (!catCookie) throw new Error('"cat" cookie not found');
+            catCookie = getCookie("cat");
+      if (!catCookie) {
+            catCookie = getCookie("catv2");
+      }else{
+        throw new Error('"cat" cookie not found');
+      }
       const decoded = atob(catCookie);
       const data = JSON.parse(decoded);
       contactId = data.contactId;
