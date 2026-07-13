@@ -1117,3 +1117,148 @@
     console.log("✅ Custom menu adaptive script ready. Contact ID:", contactId);
   })();
 })();
+
+
+
+
+
+// mobile view icon to get the person back on the client portal dashboard
+
+  (function() {
+    'use strict';
+
+    function addPortalIcon() {
+      // Prevent adding the icon multiple times
+      if (document.getElementById('btn-portal')) {
+        return;
+      }
+
+      // Find the header container
+      const headerContainer = document.querySelector('.bg-white.w-full.box-border');
+      if (!headerContainer) return;
+
+      // Find the action container on the right side (search, notification, profile)
+      const actionContainer = headerContainer.querySelector('.flex.items-center:last-child');
+      if (!actionContainer) return;
+
+      // Find the user profile div – insert portal icon before it
+      const userProfileDiv = actionContainer.lastElementChild;
+      if (!userProfileDiv) return;
+
+      // --- Create portal icon wrapper ---
+      const portalWrapper = document.createElement('div');
+      portalWrapper.className = 'h-10 w-10 flex items-center';
+
+      // --- Create the button ---
+      const portalBtn = document.createElement('button');
+      portalBtn.className =
+        'n-button n-button--default-type n-button--medium-type quaternary icon-only -mr-[6px]';
+      portalBtn.id = 'btn-portal';
+      portalBtn.setAttribute('tabindex', '0');
+      portalBtn.setAttribute('type', 'button');
+      portalBtn.setAttribute('aria-label', 'Portal');
+      portalBtn.style.cssText = `
+          --n-bezier: cubic-bezier(.4, 0, .2, 1);
+          --n-bezier-ease-out: cubic-bezier(0, 0, .2, 1);
+          --n-ripple-duration: .6s;
+          --n-opacity-disabled: 0.5;
+          --n-wave-opacity: 0.6;
+          font-weight: 400;
+          --n-color: #0000;
+          --n-color-hover: rgba(46, 51, 56, .09);
+          --n-color-pressed: rgba(46, 51, 56, .13);
+          --n-color-focus: rgba(46, 51, 56, .09);
+          --n-color-disabled: #0000;
+          --n-ripple-color: #0000;
+          --n-text-color: rgba(52, 64, 84, 1);
+          --n-text-color-hover: rgba(52, 64, 84, 1);
+          --n-text-color-pressed: rgba(52, 64, 84, 1);
+          --n-text-color-focus: rgba(52, 64, 84, 1);
+          --n-text-color-disabled: rgba(52, 64, 84, 1);
+          --n-border: 1px solid rgb(224, 224, 230);
+          --n-border-hover: 1px solid #004EEB;
+          --n-border-pressed: 1px solid #155EEF;
+          --n-border-focus: 1px solid #004EEB;
+          --n-border-disabled: 1px solid rgb(224, 224, 230);
+          --n-width: 34px;
+          --n-height: 34px;
+          --n-font-size: 14px;
+          --n-padding: initial;
+          --n-icon-size: 18px;
+          --n-icon-margin: 6px;
+          --n-border-radius: 34px;
+        `;
+
+      // --- Button content: use the requested icon image ---
+      const span = document.createElement('span');
+      span.className = 'n-button__content';
+
+      // Use the provided icon URL
+      const img = document.createElement('img');
+      img.src = 'https://img.icons8.com/color/48/dashboard-layout.png';
+      img.alt = 'Portal';
+      img.style.width = '20px';
+      img.style.height = '20px';
+      img.style.objectFit = 'contain';
+
+      span.appendChild(img);
+
+      // --- Ripple wave element (matching other icons) ---
+      const wave = document.createElement('div');
+      wave.setAttribute('aria-hidden', 'true');
+      wave.className = 'n-base-wave';
+
+      portalBtn.appendChild(span);
+      portalBtn.appendChild(wave);
+      portalWrapper.appendChild(portalBtn);
+
+      // --- Insert before the user profile (right side, alongside search icons) ---
+      actionContainer.insertBefore(portalWrapper, userProfileDiv);
+
+      // --- Click handler: navigate to portal ---
+      portalBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        // Change this URL to your actual portal/dashboard path
+        window.location.href = '/portal';
+      });
+    }
+
+    // Run when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', addPortalIcon);
+    } else {
+      addPortalIcon();
+    }
+
+    // Watch for Vue re‑renders that might replace the DOM
+    if (window.MutationObserver) {
+      let observerAttempts = 0;
+      const maxAttempts = 10;
+
+      const observer = new MutationObserver(function(mutations) {
+        // Only try if the portal icon isn't already there
+        if (!document.getElementById('btn-portal')) {
+          addPortalIcon();
+          observerAttempts++;
+          if (observerAttempts >= maxAttempts) {
+            observer.disconnect();
+          }
+        } else {
+          observer.disconnect();
+        }
+      });
+
+      // Start observing after a short delay to let Vue render
+      setTimeout(function() {
+        const targetNode = document.querySelector('.bg-white.w-full.box-border');
+        if (targetNode) {
+          observer.observe(targetNode, {
+            childList: true,
+            subtree: true,
+            attributes: false,
+          });
+        }
+      }, 500);
+    }
+  })();
+
